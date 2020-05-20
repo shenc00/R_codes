@@ -1,0 +1,260 @@
+---
+title: "Survival Analysis with R"
+output: html_notebook
+---
+
+Load built in data package “diabetic" in the survival package
+```{r}
+library(survival)
+
+data("diabetic", package = "survival")
+head(diabetic)
+```
+
+View data dimensions
+```{r}
+dim(diabetic)
+```
+
+******
+
+Kaplan meier estimator
+```{r}
+km <- survfit(Surv(time, status) ~ 1, data = diabetic) # 1 denotes that one survival curve is created for all 
+```
+
+Visualise with ggsurplot() function
+```{r warning=FALSE}
+library(survminer)
+
+ggsurvplot(km, risk.table = TRUE)
+```
+
+Kaplan meier estimator - treatment
+```{r}
+# compute survival function
+km_trt <- survfit(Surv(time, status) ~ trt, data = diabetic)
+
+# visualise with ggsurplot() function
+# add a line showing the median survival time
+km_plot0 <- ggsurvplot(km_trt, surv.median.line = "hv", title = "With or Without Treatment")
+```
+
+Kaplan meier estimator - laser
+```{r}
+# compute survival function
+km_ls <- survfit(Surv(time, status) ~ laser, data = diabetic)
+
+# visualise with ggsurplot() function
+# add a line showing the median survival time
+km_plot1 <- ggsurvplot(km_ls, surv.median.line = "hv", title = "Type of Laser Treatment")
+```
+
+Kaplan meier estimator - age
+```{r}
+# create bins for age 
+
+# view age distribution
+hist(diabetic$age)
+
+# create bins
+bin_age <- c(0, 10, 20, 30, 40, 50, 60, Inf)
+
+# name bins
+bin_name <- c("0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60+")
+
+# create a column for age bins
+diabetic$age_bin <- cut(diabetic$age, breaks = bin_age, labels = bin_name)
+
+# view data
+head(diabetic)
+```
+
+```{r}
+# compute survival function
+km_age <- survfit(Surv(time, status) ~ age_bin, data = diabetic)
+
+# visualise with ggsurplot() function
+# add a line showing the median survival time
+km_plot2 <- ggsurvplot(km_age, surv.median.line = "hv", title = "Age Group")
+```
+
+Kaplan meier estimator - eye
+```{r}
+# compute survival function
+km_eye <- survfit(Surv(time, status) ~ eye, data = diabetic)
+
+# visualise with ggsurplot() function
+# add a line showing the median survival time
+km_plot3 <- ggsurvplot(km_eye, surv.median.line = "hv", title = "Left or Right Eye Damage")
+```
+
+Kaplan meier estimator - risk
+```{r}
+# compute survival function
+km_rk <- survfit(Surv(time, status) ~ risk, data = diabetic)
+
+# visualise with ggsurplot() function
+# add a line showing the median survival time
+km_plot4 <- ggsurvplot(km_rk, surv.median.line = "hv", title = "Risk Group")
+```
+
+view plots
+```{r}
+# call plots
+km_plot0
+km_plot1
+km_plot2
+km_plot3
+km_plot4
+```
+
+******
+
+Weibull model with laser and treatment
+```{r}
+wb <- survreg(Surv(time, status) ~ risk + trt, data = diabetic)
+```
+
+compute coefficients
+```{r}
+coef(wb)
+```
+
+create "imaginary patients"
+```{r}
+newdat <- expand.grid(
+  trt = levels(factor(diabetic$trt)),
+  risk = levels(factor(diabetic$risk)))
+
+newdat$risk <- as.numeric(as.character(newdat$risk)) # convert risk to numeric variable
+
+head(newdat)
+```
+
+Compute survival curves
+```{r}
+surv <- seq(.99, .01, by = -.01)
+t <- predict(wb, type = "quantile", p = 1-surv, newdata = newdat)
+```
+
+Create a dataframe
+```{r}
+library(reshape2)
+
+# combine the information in newdat with t
+surv_wb_wide <- cbind(newdat, t) 
+
+# bring the data.frame to long format
+surv_wb <- melt(surv_wb_wide, id.vars = c("trt", "risk"), variable.name = "surv_id", value.name = "time") 
+
+# surv_id to add the correct survival probabilities surv
+surv_wb$surv <- surv[as.numeric(surv_wb$surv_id)]
+
+# add columns upper, lower, std.err, and strata to the data.frame
+surv_wb[, c("upper", "lower", "std.err", "strata")] <- NA
+```
+
+Visualise with ggsurvplot_df() function
+```{r}
+ggsurvplot_df(surv_wb, surv.geom = geom_line,linetype = "trt", color = "risk", legend.title = NULL)
+```
+
+weibull model for log-normal
+```{r}
+# Log-Normal model
+lnmod <- survreg(Surv(time, status) ~ risk + trt, data = diabetic, dist = "lognormal")
+
+# Newdata
+newdat_ln <- expand.grid(
+  trt = levels(factor(diabetic$trt)),
+  risk = levels(factor(diabetic$risk)))
+
+newdat_ln$risk <- as.numeric(as.character(newdat_ln$risk)) # convert risk to numeric variable
+
+# Survival curve from Weibull model and log-normal model
+lnt <- predict(lnmod, type = "quantile", p = 1-surv, newdata = newdat_ln)
+
+# combine the information in newdat with lnt
+surv_wide <- cbind(newdat_ln, lnt) 
+
+# Melt the data.frame into long format.
+surv_long <- melt(surv_wide, id.vars = c("trt", "risk"), variable.name = "surv_id", value.name = "time")
+
+# Add column for the survival probabilities
+surv_long$surv <- surv[as.numeric(surv_long$surv_id)]
+
+# Add columns upper, lower, std.err, and strata contianing NA values
+surv_long[, c("upper", "lower", "std.err", "strata")] <- NA
+
+# Plot the survival curves
+ggsurvplot_df(surv_long, surv.geom = geom_line, 
+              linetype = "trt", color = "risk", legend.title = NULL)
+```
+
+Weibull model with all factors
+```{r}
+wb_all <- survreg(Surv(time, status) ~ risk + trt + eye + age + laser, data = diabetic)
+
+# compute coefficients
+coef(wb_all)
+```
+
+
+******
+
+cox model with risk and treatment
+```{r}
+cox <- coxph(Surv(time, status) ~ risk + trt, data = diabetic)
+```
+
+compute coefficients
+```{r}
+coef(cox)
+```
+create "imaginary patients"
+```{r}
+newdat_cox <- expand.grid(
+  trt = levels(factor(diabetic$trt)),
+  risk = levels(factor(diabetic$risk)))
+
+newdat_cox$risk <- as.numeric(as.character(newdat_cox$risk)) # convert risk to numeric variable
+
+rownames(newdat_cox) <- letters[1:length(newdat_cox$trt)] # include an alphabetical row name for use later
+
+head(newdat_cox)
+```
+
+Compute survival curves
+```{r}
+cxsf <- survfit(cox, data = diabetic, newdata = newdat_cox, conf.type = "none")
+```
+
+Create a dataframe
+```{r}
+# compute data.frame needed for plotting
+surv_cx <- surv_summary(cxsf)
+
+# get a character vector of alphabetic index we created earlier as id
+id <- as.character(surv_cx$strata)
+
+# multiple of the rows in newdat so that it fits with surv_cx dataframe
+m_newdat <- newdat_cox[id, ]
+
+# add surv id info to data.frame
+surv_cxmod <- cbind(surv_cx, m_newdat)
+```
+
+Visualise with ggsurvplot_df() function
+```{r}
+ggsurvplot_df(surv_cxmod, linetype = "trt", color = "risk", legend.title = NULL, censor = TRUE)
+```
+
+cox model with all factors
+```{r}
+cox_all <- coxph(Surv(time, status) ~ risk + trt + eye + age + laser, data = diabetic)
+
+# compute coefficients
+coef(cox_all)
+```
+
